@@ -164,16 +164,45 @@ def get_file_paths(uuid: str, filename: str, directory: str, library_path: Path)
         'derivatives': []
     }
 
+    # Ensure library_path is absolute and resolved
+    library_path = Path(library_path).resolve()
+
+    # Safety check: ensure we're actually in a photoslibrary (has database/Photos.sqlite)
+    if not (library_path / "database" / "Photos.sqlite").exists():
+        # This shouldn't happen if called correctly, but be safe
+        return paths
+
     # Extract extension from filename
     ext = Path(filename).suffix
 
     # For newer Photos.app format, ZDIRECTORY is just a hash character (0-9, A-F)
     # For older iPhoto/Aperture format, ZDIRECTORY might contain a full path
     if directory and directory not in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F']:
-        # Old format - use the directory path as-is
+        # Old format - try the directory path as-is, but also check common legacy locations
+        # First try the exact path from ZDIRECTORY
+        # Make sure we're working with the library_path and not accidentally using destination
         original_path = library_path / directory / filename
-        if original_path.exists():
-            paths['original'] = str(original_path.relative_to(library_path))
+        # Resolve any symlinks and ensure path is actually within library
+        try:
+            resolved_lib = library_path.resolve()
+            resolved_path = original_path.resolve()
+            if original_path.exists() and str(resolved_path).startswith(str(resolved_lib)):
+                paths['original'] = str(original_path.relative_to(library_path))
+        except (ValueError, OSError):
+            # Path might be outside library or doesn't exist, skip this one
+            pass
+
+        # Also check legacy Masters directory
+        if not paths['original']:
+            legacy_path = library_path / "Masters.legacy" / directory / filename
+            try:
+                if legacy_path.exists():
+                    resolved_lib = library_path.resolve()
+                    resolved_path = legacy_path.resolve()
+                    if str(resolved_path).startswith(str(resolved_lib)):
+                        paths['original'] = str(legacy_path.relative_to(library_path))
+            except (ValueError, OSError):
+                pass
     else:
         # New format - use first character of UUID as hash directory
         hash_dir = uuid[0].upper()
