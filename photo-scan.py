@@ -108,6 +108,7 @@ def group_and_report(
     group_size_thresholds: list[int],
     display_limit: int,
     dump_all_folders: bool,
+    show_subdirs: bool = False,
 ):
     """
     Group folders by size categories and common root folders, then print a report.
@@ -118,7 +119,7 @@ def group_and_report(
 
     # Grouping logic
     grouped_stats = defaultdict(
-        lambda: {"count": 0, "size": 0, "ext_counter": Counter(), "folders": []}
+        lambda: {"count": 0, "size": 0, "ext_counter": Counter(), "folders": [], "subdirs": defaultdict(lambda: {"count": 0, "size": 0, "ext_counter": Counter()})}
     )
 
     # Define size categories (largest to smallest)
@@ -159,6 +160,24 @@ def group_and_report(
         grouped_entry["ext_counter"].update(data["ext_counter"])
         grouped_entry["folders"].append((folder, data)) # Store individual folder data for later if needed
 
+        # Track subdirectory stats if requested
+        if show_subdirs:
+            # Get the first subdirectory under the root_group
+            # For Masters/Photos/2010/..., we want "Photos" or "2010" depending on structure
+            subdir_key = "/"
+            if parts:
+                # Skip the root_group parts and take the next level
+                root_parts = root_group.split('/')
+                if len(parts) > len(root_parts):
+                    subdir_key = parts[len(root_parts)]
+                elif len(parts) > 1:
+                    subdir_key = parts[1]
+
+            subdir_entry = grouped_entry["subdirs"][subdir_key]
+            subdir_entry["count"] += data["count"]
+            subdir_entry["size"] += data["size"]
+            subdir_entry["ext_counter"].update(data["ext_counter"])
+
     sorted_groups = sorted(grouped_stats.items(), key=lambda kv: kv[1]["size"], reverse=True)
 
     print(f"\nSummary for {root} (Grouped by Size and Root Folder)\n")
@@ -174,6 +193,18 @@ def group_and_report(
         print(
             f"{group_name:<40} {count:8d} {human_readable(total):>12} {human_readable(avg):>12} {top_ext:>10}"
         )
+
+        # Show subdirectory breakdown if requested
+        if show_subdirs and data["subdirs"]:
+            sorted_subdirs = sorted(data["subdirs"].items(), key=lambda kv: kv[1]["size"], reverse=True)
+            for subdir_name, subdir_data in sorted_subdirs:
+                subdir_count = subdir_data["count"]
+                subdir_total = subdir_data["size"]
+                subdir_avg = subdir_total / subdir_count if subdir_count else 0
+                subdir_ext = subdir_data["ext_counter"].most_common(1)[0][0] if subdir_data["ext_counter"] else ""
+                print(
+                    f"  └─ {subdir_name:<36} {subdir_count:8d} {human_readable(subdir_total):>12} {human_readable(subdir_avg):>12} {subdir_ext:>10}"
+                )
 
 
 # ----------------------------------------------------------------------
@@ -204,6 +235,11 @@ def main():
         action="store_true",
         help="Dump all individual folder statistics, overriding the default grouped view.",
     )
+    parser.add_argument(
+        "--show-subdirs",
+        action="store_true",
+        help="Show subdirectory breakdown within each group (intermediate detail level).",
+    )
     args = parser.parse_args()
 
     if not args.library_path.is_dir():
@@ -225,6 +261,7 @@ def main():
         group_threshold_bytes,
         args.display_limit,
         args.dump_all_folders,
+        args.show_subdirs,
     )
 
 
